@@ -1,10 +1,26 @@
 #!/usr/bin/env python
 
-
 import argparse
 import json
 import pprint
+from TroposphereClassCreator import TroposphereClassCreator
 
+imports = ''
+header = ''
+footer = ''
+currentNode = ''
+allNodes = {}
+def addToNode(node, addition=''):
+    return node + addition + '\n'
+
+def appendToAllNodes(awsType, tropo_name, node):
+    global allNodes
+    if awsType not in allNodes:
+        allNodes[awsType] = {} 
+    if tropo_name not in allNodes[awsType]:
+        allNodes[awsType][tropo_name] = [node]
+    else:
+        allNodes[awsType][tropo_name].append(node)
 
 class object_registry(object):
     """Keep track of objects being created as Parameters or Resources
@@ -46,15 +62,17 @@ def additional_imports(o):
         return o
 
 def do_header(d):
+    global imports
+    global header
     """Output a stock header for the new Python script and also try to
     figure out the Resource imports needed by the template.
     """
-    print 'from troposphere import Base64, Select, FindInMap, GetAtt, GetAZs, Join, Output'
-    print 'from troposphere import Parameter, Ref, Tags, Template'
-    print 'from troposphere.cloudformation import Init'
-    print 'from troposphere.cloudfront import Distribution, DistributionConfig'
-    print 'from troposphere.cloudfront import Origin, DefaultCacheBehavior'
-    print 'from troposphere.ec2 import PortRange'
+    imports = addToNode(imports,'from troposphere import Base64, Select, FindInMap, GetAtt, GetAZs, Join, Output')
+    imports = addToNode(imports, 'from troposphere import Parameter, Ref, Tags, Template')
+    imports = addToNode(imports, 'from troposphere.cloudformation import Init')
+    imports = addToNode(imports, 'from troposphere.cloudfront import Distribution, DistributionConfig')
+    imports = addToNode(imports, 'from troposphere.cloudfront import Origin, DefaultCacheBehavior')
+    imports = addToNode(imports, 'from troposphere.ec2 import PortRange')
 
     # Loop over the resources to find imports
     if 'Resources' in d:
@@ -64,45 +82,47 @@ def do_header(d):
             (mod, tropo_object) = generate_troposphere_object(v['Type'])
             if tropo_object not in seen:
                 seen.append(tropo_object)
-                print 'from troposphere.%s import %s' % (mod, additional_imports(tropo_object))
-    print
-    print
-    print "t = Template()"
-    print
+                imports = addToNode(imports, 'from troposphere.%s import %s' % (mod, additional_imports(tropo_object)))
+    imports = addToNode(imports)
+    imports = addToNode(imports)
+    header = addToNode(header, "t = Template()")
+    header = addToNode(header) 
 
 
 def do_awstemplateformatversion(d):
     """Output the template version"""
-    print 't.add_version("%s")' % (d['AWSTemplateFormatVersion'], )
-    print
+    global header
+    header = addToNode(header, 't.add_version("%s")' % (d['AWSTemplateFormatVersion'], ))
+    header = addToNode(header) 
 
 
 def do_description(d):
     """Output the template Description"""
-    print 't.add_description("""\\\n%s""")' % (d['Description'], )
+    global header
+    header = addToNode(header, 't.add_description("""\\\n%s""")' % (d['Description'], ))
 
 
 def do_parameters(d):
+    global currentNode
     """Output the template Parameters"""
     params = d['Parameters']
     for k, v in params.items():
         object_name = objects.add(k)
-        print '%s = t.add_parameter(Parameter(' % (object_name,)
-        print '    "%s",' % (k, )
+        currentNode = addToNode(currentNode,  '%s = t.add_parameter(Parameter(' % (object_name,))
+        currentNode = addToNode(currentNode,  '    "%s",' % (k, ))
         for pk, pv in v.items():
-            print '    %s=%s,' % (pk, output_value(pv))
-        print "))"
-        print
+            currentNode = addToNode(currentNode,  '    %s=%s,' % (pk, output_value(pv)))
+        currentNode = addToNode(currentNode,  "))")
 
 
 def do_mappings(d):
+    global currentNode
     """Output the template Mappings"""
     mappings = d['Mappings']
     for k, v in mappings.items():
-        print 't.add_mapping("%s",' % (k,)
-        pprint.pprint(v)
-        print ")"
-        print
+        currentNode = addToNode(currentNode,  't.add_mapping("%s",' % (k,))
+        currentNode = addToNode(v)
+        currentNode = addToNode(currentNode,  ")")
 
 
 def generate_troposphere_object(typename):
@@ -138,6 +158,8 @@ known_functions = {
     "AccessLoggingPolicy":      1,
     "AWS::CloudFormation::Init":1,
     "PrivateIpAddresses"       :1,
+    "VersioningConfiguration":  1,
+    "HostedZoneConfig":  1,
 }
 
 function_quirks = {
@@ -148,43 +170,49 @@ function_quirks = {
     "LoginProfile":       { "LoginProfile": ["Password"] },
     "AWS::CloudFormation::Init": {"Init": []},
     "PrivateIpAddresses" : ["PrivateIpAddressSpecification"],
+    "VersioningConfiguration": "VersioningConfiguration",
+    "HostedZoneConfig": "HostedZoneConfiguration",
 }
 
 def do_output_function(k, f, v):
-    print '    %s=%s(' % (k, f)
+    global currentNode
+    currentNode = addToNode(currentNode,  '    %s=%s(' % (k, f))
     for pk, pv in v.items():
         if known_functions.has_key(pk):
-            do_resources_content(pk, pv, "")
+            do_resources_content(pk, pv)
         else:
-            print "        %s=%s," % (pk, output_value(pv))
-    print '    ),'
+            currentNode = addToNode(currentNode,  "        %s=%s," % (pk, output_value(pv)))
+    currentNode = addToNode(currentNode,  '    ),')
 
-def do_output_quirk_list(k, f, v):
-    print '    %s=[' % (k)
+def do_output_quirk_list(k, f, v): 
+    global currentNode
+    currentNode = addToNode(currentNode,  '    %s=[' % (k))
     for e in v:
-        print '    %s(' % (f)
+        currentNode = addToNode(currentNode,  '    %s(' % (f))
         for pk, pv in e.items():
             if known_functions.has_key(pk):
                 do_resources_content(pk, pv)
             else:
-                print "        %s=%s," % (pk, output_value(pv))
-        print '    ),'
-    print '    ],'
+                currentNode = addToNode(currentNode,  "        %s=%s," % (pk, output_value(pv)))
+        currentNode = addToNode(currentNode,  '    ),')
+    currentNode = addToNode(currentNode,  '    ],')
 
 def do_output_quirk_mapping(k, v):
+    global currentNode
     m = function_quirks[k]
     for pk in m.keys():
-        print '    %s=%s(' % (k, pk)
+        currentNode = addToNode(currentNode,  '    %s=%s(' % (k, pk))
         for e in m[pk]:
-            print "        %s," % (output_value(v[e]))
-        print '    ),'
+            currentNode = addToNode(currentNode,  "        %s," % (output_value(v[e])))
+        currentNode = addToNode(currentNode,  '    ),')
 
 def do_output_quirk_metadata(k, v):
+    global currentNode
     m = function_quirks[k]
     for pk in m.keys():
-        print '    Metadata=%s(' % (pk)
-        print "        %s," % (output_value(v))
-        print '    ),'
+        currentNode = addToNode(currentNode,  '    Metadata=%s(' % (pk))
+        currentNode = addToNode(currentNode,  "        %s," % (output_value(v)))
+        currentNode = addToNode(currentNode,  '    ),')
 
 def do_resources_content(k, v, p=""):
     if function_quirks.has_key(k):
@@ -207,36 +235,44 @@ top_level_aliases = {
 }
 
 def do_resources(d):
+    global currentNode
     """Output the template Resources"""
     resources = d['Resources']
     for k, v in resources.items():
+        currentNode = ''
         object_name = objects.add(k)
         (_, tropo_object) = generate_troposphere_object(v['Type'])
         if(top_level_aliases.has_key(tropo_object)):
             tropo_object = top_level_aliases[tropo_object]
-        print '%s = t.add_resource(%s(' % (object_name, tropo_object)
-        print '    "%s",' % (k, )
+        currentNode = addToNode(currentNode,  '%s = t.add_resource(%s(' % (object_name, tropo_object))
+        currentNode = addToNode(currentNode,  '    "%s",' % (k, ))
         for p in filter(lambda x: v.has_key(x), ['Metadata', 'Properties']):
             for pk, pv in v[p].items():
                 if pk == "Tags":
-                    print '    Tags=Tags('
+                    currentNode = addToNode(currentNode,  '    Tags=Tags(')
                     for d in pv:
-                        print "        %s=%s," % (
-                            d['Key'], output_value(d['Value']))
-                    print '    ),'
+                        currentNode = addToNode(currentNode,  "        %s=%s," % (
+                            d['Key'], output_value(d['Value'])))
+                    currentNode = addToNode(currentNode,  '    ),')
                 elif pk == 'PortRange':
-                    print "    %s=%s(%s)," % (pk, pk, output_dict(pv))
+                    currentNode = addToNode(currentNode,  "    %s=%s(%s)," % (pk, pk, output_dict(pv)))
                 elif known_functions.has_key(pk):
                     do_resources_content(pk, pv, p)
                 elif isinstance(pv, basestring):
-                    print '    %s="%s",' % (pk, pv)
+                    if pkShouldBeInt(pk):
+                        currentNode = addToNode(currentNode, '    {0}={1},'.format(pk, pv))
+                    else:
+                        currentNode = addToNode(currentNode,  '    %s="%s",' % (pk, pv))
                 else:
-                    print '    %s=%s,' % (pk, output_value(pv))
+                    currentNode = addToNode(currentNode,  '    %s=%s,' % (pk, output_value(pv)))
         if v.has_key("DependsOn"):
-            print '    %s=%s,' % ("DependsOn", output_value(v['DependsOn']))
-        print "))"
-        print
+            currentNode = addToNode(currentNode,  '    %s=%s,' % ("DependsOn", output_value(v['DependsOn'])))
+        currentNode = addToNode(currentNode,  "))")
+        appendToAllNodes(_, tropo_object, currentNode)
 
+def pkShouldBeInt(pv):
+    intList = ['HealthCheckGracePeriod']
+    return pv in intList
 
 def handle_no_objects(name, values):
     """Handle intrinsic functions which do not have a named resource"""
@@ -259,11 +295,11 @@ def handle_one_object(name, values):
 function_map = {
     'Fn::Base64': ("Base64", handle_no_objects),
     'Fn::FindInMap': ("FindInMap", handle_no_objects),
-    'Fn::GetAtt': ("GetAtt", handle_one_object),
+    'Fn::GetAtt': ("GetAtt", handle_no_objects),
     'Fn::GetAZs': ("GetAZs", handle_no_objects),
     'Fn::Join': ("Join", handle_no_objects),
     'Fn::Select': ("Select", handle_one_object),
-    'Ref': ("Ref", handle_one_object),
+    'Ref': ("Ref", handle_no_objects),
 }
 
 
@@ -287,33 +323,41 @@ def output_value(v):
                 fv = [fv]
             return handler(shortname, fv)
         else:
+            for x in fv:
+                if isinstance(x, dict) and 'Ref' in x:
+                    x['Ref'] = '"' + x['Ref'] + '"' 
             out.append( '"' + fk + '": ' + output_value(fv))
     return "{ " + ", ".join(out) + " }"
 
 
 def do_outputs(d):
+    global currentNode
     """Output the template Outputs"""
     outputs = d['Outputs']
     for k, v in outputs.items():
-        print '%s = t.add_output(Output(' % (k,)
-        print '    "%s",' % (k, )
+        currentNode = addToNode(currentNode,  '%s = t.add_output(Output(' % (k,))
+        currentNode = addToNode(currentNode,  '    "%s",' % (k, ))
         for pk, pv in v.items():
             if isinstance(pv, basestring):
-                print '    %s="%s",' % (pk, pv)
+                currentNode = addToNode(currentNode,  '    %s="%s",' % (pk, pv))
             else:
-                print '    %s=%s,' % (pk, output_value(pv))
-        print "))"
-        print
+                currentNode = addToNode(currentNode,  '    %s=%s,' % (pk, output_value(pv)))
+        currentNode = addToNode(currentNode,  "))")
 
 
 def do_trailer(d):
     """Output a trailer section for the new Python script."""
     print 'print(t.to_json())'
 
+def createTroposphereClasses(region, dictionary):
+   troposphereClassCreator = TroposphereClassCreator(region, dictionary) 
+   troposphereClassCreator.makeClasses()
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("filename", help="template to convert")
+    parser.add_argument("createfiles", nargs="?", help="save files to region", default="")
     args = parser.parse_args()
 
     d = json.load(open(args.filename))
@@ -333,4 +377,18 @@ if __name__ == "__main__":
         if s in d.keys():
             globals()["do_" + s.lower()](d)
 
-    do_trailer(d)
+    if len(args.files) > 0:
+        region = raw_input('Please enter the region to save Python classes to: ') 
+        if len(region) > 0:
+            createTroposphereClasses(region, allNodes)
+        else:
+            print "please enter a valid region name"
+            exit(2)
+    else:
+        print imports
+        print header
+        for resources in allNodes:
+            for resource in allNodes[resources]:
+                for x in allNodes[resources][resource]:
+                    print x
+        do_trailer(d)
